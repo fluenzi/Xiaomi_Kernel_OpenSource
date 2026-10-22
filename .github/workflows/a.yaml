@@ -35,9 +35,15 @@ jobs:
 
       - name: Download Toolchain (AOSP Clang)
         run: |
-          mkdir -p toolchain
-          git clone --depth=1 https://gitlab.com/panchajanya/tc-build.git -b master toolchain/clang
-
+          mkdir -p toolchain/clang
+          echo "Downloading AOSP Clang..."
+          # Downloading a stable AOSP Clang release (e.g., Clang 18 / r510928 or similar)
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r510928.tar.gz -O clang.tar.gz || \
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r498829b.tar.gz -O clang.tar.gz
+          
+          tar -xzf clang.tar.gz -C toolchain/clang
+          rm clang.tar.gz
+          
       - name: Setup KernelSU-Next
         run: |
           cd kernel-source
