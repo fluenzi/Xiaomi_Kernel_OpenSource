@@ -1,1 +1,84 @@
+name: Build Kernel with KernelSU-Next
 
+on:
+  workflow_dispatch:
+    inputs:
+      KERNEL_SOURCE:
+        description: 'Kernel Source Repository URL'
+        required: true
+        default: 'https://github.com/MiCode/Xiaomi_Kernel_OpenSource'
+      KERNEL_BRANCH:
+        description: 'Kernel Source Branch'
+        required: true
+        default: 'annibale-w-oss'
+      KERNEL_DEFCONFIG:
+        description: 'Kernel Defconfig Target'
+        required: true
+        default: 'vendor/sm8750_defconfig'
+
+jobs:
+  build:
+    name: Build POCO F8 Pro Kernel
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize Build Space & Install Dependencies
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc git flex bison libssl-dev libelf-dev libncurses-dev zip unzip ccache clang llvm lld
+
+      - name: Checkout Kernel Source
+        run: |
+          git clone --depth=1 -b ${{ github.event.inputs.KERNEL_BRANCH }} ${{ github.event.inputs.KERNEL_SOURCE }} kernel-source
+          cd kernel-source
+
+      - name: Download Toolchain (AOSP Clang)
+        run: |
+          mkdir -p toolchain
+          git clone --depth=1 https://gitlab.com/panchajanya/tc-build.git -b master toolchain/clang
+
+      - name: Setup KernelSU-Next
+        run: |
+          cd kernel-source
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+
+      - name: Build Kernel Image
+        run: |
+          cd kernel-source
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export PATH="$(pwd)/../toolchain/clang/bin:${PATH}"
+          export CC=clang
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
+
+          mkdir -p out
+          make O=out ${{ github.event.inputs.KERNEL_DEFCONFIG }}
+
+          # Inject KernelSU & Kprobe configuration options
+          ./scripts/config --file out/.config --enable CONFIG_KSU
+          ./scripts/config --file out/.config --enable CONFIG_KPROBES
+          ./scripts/config --file out/.config --enable CONFIG_KPROBE_EVENTS
+          ./scripts/config --file out/.config --enable CONFIG_KSU_KPROBE_HOOKS
+
+          make O=out olddefconfig
+          make O=out -j$(nproc --all) Image.gz-dtb dtbo.img
+
+      - name: Package Output (AnyKernel3)
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          rm -rf AnyKernel3/.git
+          if [ -f kernel-source/out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp kernel-source/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          elif [ -f kernel-source/out/arch/arm64/boot/Image ]; then
+            cp kernel-source/out/arch/arm64/boot/Image AnyKernel3/
+          fi
+          cd AnyKernel3
+          zip -r9 ../POCO_F8_Pro_KernelSU_Next.zip * -x .git README.md
+
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: POCO_F8_Pro_KernelSU_Next
+          path: POCO_F8_Pro_KernelSU_Next.zip
